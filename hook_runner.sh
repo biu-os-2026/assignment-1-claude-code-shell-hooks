@@ -57,29 +57,73 @@ BLOCKED=0
 WARNINGS=0
 FINAL_EXIT=0
 
-# =============================================================================
+# # =============================================================================
 # TODO: Process the config file line by line.
 #
 # For each line in hooks_config.txt:
-#   1. Skip comments (lines starting with '#') and empty lines.
-#   2. Split the line on ':' to get three fields:
+while IFS= read -r line; do
+#      1. Skip comments (lines starting with '#') and empty lines.
+    if [[ "$line" == "#"* ]] || [[ -z "$line" ]]; then
+        continue
+    fi
+#        2. Split the line on ':' to get three fields:
 #        CONF_EVENT   — the hook event type (e.g. PreToolUse)
 #        CONF_MATCHER — the tool matcher (e.g. Bash, Edit, or * for all)
 #        CONF_SCRIPT  — the path to the hook script (rest of line after second ':')
-#   3. Skip the line if CONF_EVENT does not match EVENT_TYPE.
-#   4. Skip the line if CONF_MATCHER does not match TOOL_NAME and is not '*'.
-#   5. Increment MATCHED.
-#   6. Resolve the script path: if CONF_SCRIPT starts with './', prepend RUNNER_DIR.
+    CONF_EVENT=$(echo "$line" | cut -d':' -f1)
+    CONF_MATCHER=$(echo "$line" | cut -d':' -f2)
+    CONF_SCRIPT=$(echo "$line" | cut -d':' -f3)
+#       3. Skip the line if CONF_EVENT does not match EVENT_TYPE.
+    if [[ "$CONF_EVENT" != "$EVENT_TYPE" ]]; then
+        continue
+    fi
+#       4. Skip the line if CONF_MATCHER does not match TOOL_NAME and is not '*'.
+
+    if [[ "$CONF_MATCHER" != "$TOOL_NAME" ]] && [[ "$CONF_MATCHER" != "*" ]]; then
+        continue
+    fi
+#      5. Increment MATCHED.
+    MATCHED=$((MATCHED + 1))
+#       6. Resolve the script path: if CONF_SCRIPT starts with './', prepend RUNNER_DIR.
+    if [["$CONF_SCRIPT" == "./"*]]; then
+        CONF_SCRIPT=$(echo "$CONF_SCRIPT" | sed "s|^\.|${RUNNER_DIR}|")
+    fi
 #   7. Print which script is running (use the CYAN colour).
+    printf '%bRunning hook:%b %s\n' "$CYAN" "$RESET" "$CONF_SCRIPT"
 #   8. Execute the hook script feeding it the saved stdin (TEMP_FILE).
 #      Capture stderr separately and save the exit code to EXIT_CODE.
+    ERR_TEMP=$(mktemp)
+    trap 'rm -f "$TEMP_FILE" "$ERR_TEMP"' EXIT
+    "$CONF_SCRIPT" < "$TEMP_FILE" 2> "$ERR_TEMP"
+    EXIT_CODE=$?
 #   9. Based on EXIT_CODE:
 #        0  → print green "✓ Passed",  increment PASSED
 #        2  → print red   "✗ BLOCKED", print stderr if any, increment BLOCKED,
 #             set FINAL_EXIT=2, print chain-stopped message, and break the loop
 #        else→ print yellow "⚠ Warning (exit N)", print stderr if any,
 #             increment WARNINGS
+    if [[ "$EXIT_CODE" -eq 0 ]]; then
+        printf '%b✓ Passed%b\n' "$GREEN" "$RESET"
+        ((PASSED++))
+    elif [[ "$EXIT_CODE" -eq 2 ]]; then
+        printf '%b✗ BLOCKED%b\n' "$RED" "$RESET"
+        if [[ -s "$ERR_TEMP" ]]; then
+            cat "$ERR_TEMP"
+        fi
+        ((BLOCKED++))
+        FINAL_EXIT=2
+        printf "Hook chain stopped due to a BLOCKED status.\n"
+        break
+    else
+        printf '%b⚠ Warning (exit %d)%b\n' "$YELLOW" "$EXIT_CODE" "$RESET"
+        if [[ -s "$ERR_TEMP" ]]; then
+            cat "$ERR_TEMP"
+        fi
+        ((WARNINGS++))
+    fi
 #  10. Print a blank line after each hook result.
+    printf '/n'
+done < "$CONFIG_FILE"
 # =============================================================================
 
 # ── Summary ────────────────────────────────────────────────────────────────────
