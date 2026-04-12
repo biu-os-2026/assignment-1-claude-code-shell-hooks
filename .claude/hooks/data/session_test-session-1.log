@@ -1,0 +1,6 @@
+[2026-04-07 01:45:09] BACKUP src/main.c -> $DATA_DIR/.backups/main.c.20240101_120000 (512 bytes)
+[2026-04-07 01:45:09] SYNTAX_OK src/main.c (c)
+[2026-04-07 01:45:09] BACKUP src/main.c -> $DATA_DIR/.backups/main.c.20240101_120001 (520 bytes)
+[2026-04-07 01:45:09] BACKUP src/utils.h -> $DATA_DIR/.backups/utils.h.20240101_120002 (128 bytes)
+[2026-04-07 01:45:09] SYNTAX_ERROR src/broken.c (c)
+[2026-04-07 01:45:09] SYNTAX_OK src/utils.h (c)

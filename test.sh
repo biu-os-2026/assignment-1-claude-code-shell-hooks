@@ -86,13 +86,14 @@ make_edit_json() {
 CONFIG_DIR="$HOOKS_DIR/config"
 mkdir -p "$CONFIG_DIR"
 
-cat > "$CONFIG_DIR/hooks.conf" <<'EOF'
+MAX_BACKUPS=5
+cat > "$CONFIG_DIR/hooks.conf" <<EOF
 # Rate Limiter 
 MAX_COMMANDS=50
 WARNING_THRESHOLD=40
 
 # Auto Backup 
-MAX_BACKUPS=5
+MAX_BACKUPS=$MAX_BACKUPS
 EOF
 
 cat > "$CONFIG_DIR/dangerous_patterns.txt" <<'EOF'
@@ -317,18 +318,17 @@ make_edit_json "/nonexistent/path/file.c" | bash "$BACKUP_HOOK" > /dev/null 2>&1
 assert_exit 0 $? "Non-existent file path should exit 0 (no-op)"
 
 # Test rotation: create MAX_BACKUPS+2 backups, check count stays at MAX_BACKUPS
-export MAX_BACKUPS=3
 BASE="$(basename "$TEST_SRC")"
-for i in 1 2 3 4 5; do
+for i in $(seq 1 $((MAX_BACKUPS + 2))); do
     sleep 1  # Ensure unique timestamps
     make_edit_json "$TEST_SRC" | bash "$BACKUP_HOOK" > /dev/null 2>&1
 done
 AFTER_ROTATE="$(ls -1 "$DATA_DIR/.backups/${BASE}."* 2>/dev/null | wc -l | tr -d ' ')"
-if [ "$AFTER_ROTATE" -le 3 ]; then
-    printf '  %bPASS%b  Rotation kept %d backups (MAX_BACKUPS=3)\n' "$GREEN" "$RESET" "$AFTER_ROTATE"
+if [ "$AFTER_ROTATE" -le "$MAX_BACKUPS" ]; then
+    printf '  %bPASS%b  Rotation kept %d backups (MAX_BACKUPS=%d)\n' "$GREEN" "$RESET" "$AFTER_ROTATE" "$MAX_BACKUPS"
     PASS=$((PASS + 1))
 else
-    printf '  %bFAIL%b  Rotation failed: %d backups exist (expected ≤3)\n' "$RED" "$RESET" "$AFTER_ROTATE"
+    printf '  %bFAIL%b  Rotation failed: %d backups exist (expected ≤%d)\n' "$RED" "$RESET" "$AFTER_ROTATE" "$MAX_BACKUPS"
     FAIL=$((FAIL + 1))
 fi
 unset MAX_BACKUPS

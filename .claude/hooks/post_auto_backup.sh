@@ -5,5 +5,5 @@
 # Input:      JSON on stdin: {"tool_name":"Edit","tool_input":{"file_path":"..."},...}
 # Exit codes: 0 always (post-hooks should not block)
 # Backups:    data/.backups/<basename>.<timestamp>
-# Log:        data/session_<session_id>.log
+# Log:        data/session.log
 # =============================================================================

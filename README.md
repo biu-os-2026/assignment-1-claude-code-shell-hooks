@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Deadline** | April 20 23:59, 2026 |
+| **Deadline** | May 5 23:59, 2026 |
 | **Submission** | GitHub Classroom — your code is tested automatically on every push |
 | **Type** | Solo assignment |
 | **Language** | Bash only |
@@ -13,6 +13,12 @@
 > **⚠️ Please read ALL instructions carefully before starting to code.**
 
 > **Can't find your name in the GitHub Classroom?** If you don't see your name on the exercise classroom welcome board, contact us immediately for help.
+
+> **Running on Windows (WSL/Git Bash)?** If you get errors like `\r: command not found` or `bad interpreter`, run this command once after cloning:
+> ```bash
+> dos2unix test.sh hook_runner.sh .claude/hooks/*.sh
+> ```
+> This converts Windows-style line endings (CRLF) to Unix format (LF). Install with `sudo apt install dos2unix` if needed.
 
 ### Submission details
 
@@ -104,7 +110,7 @@ This is the folder structure you receive. You must implement all files marked wi
 
 ```
 ├── hook_runner.sh                        ← IMPLEMENT (starter template provided)
-├── hooks_config.txt                      ← PROVIDED — do not modify
+├── hooks_config.txt                      ← PROVIDED — (example — may change in tests)
 ├── test.sh                               ← PROVIDED — automated tests run on every push
 ├── .env                                  ← PROVIDED — example secret file used by pre_secrets_guard.sh demo
 ├── .claude/
@@ -198,10 +204,15 @@ Warnings: 0
 The runner reads `hooks_config.txt` to discover which scripts to run for a given event and tool:
 
 ```
-# event_type:tool_matcher:script_path
+# Hook Runner Configuration
+# Format: event_type:tool_matcher:script_path
+# tool_matcher supports * wildcard (matches any tool name)
+# Hooks run in order; first exit-2 stops the chain for PreToolUse
 PreToolUse:Bash:./.claude/hooks/pre_command_firewall.sh
 PreToolUse:Bash:./.claude/hooks/pre_rate_limiter.sh
+PreToolUse:Bash:./.claude/hooks/pre_commit_validator.sh
 PostToolUse:Edit:./.claude/hooks/post_auto_backup.sh
+PostToolUse:Edit:./.claude/hooks/post_syntax_checker.sh
 Stop:*:./.claude/hooks/post_session_summary.sh
 ```
 
@@ -660,51 +671,87 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"/tmp/file.xyz"},"session_id
    - Count `BACKUP` lines → backups made
    - Count `SYNTAX_OK` and `SYNTAX_ERROR` lines separately
    - First and last timestamps → session time range
-   - Top 3 most-edited files (from BACKUP lines) using `sort | uniq -c | sort -rn | head -3`
-   - File type counts using `awk`
+   - Top 3 most-edited files (from BACKUP lines)
+   - File type counts
 5. **Generate formatted report to stdout:**
-```
-╔══════════════════════════════════════╗
-║        SESSION SUMMARY REPORT        ║
-╚══════════════════════════════════════╝
 
-Session: abc123
-Period:  2026-04-03 14:00:00 -> 2026-04-03 14:30:00
+   The report is printed as a Claude Code `systemMessage` (JSON on stdout).
+   The sample log `.claude/hooks/data/session_test-session-1.log` contains:
+   ```
+   [2026-04-07 01:45:09] BACKUP src/main.c -> .backups/main.c.20240101_120000 (512 bytes)
+   [2026-04-07 01:45:09] SYNTAX_OK src/main.c (c)
+   [2026-04-07 01:45:09] BACKUP src/main.c -> .backups/main.c.20240101_120001 (520 bytes)
+   [2026-04-07 01:45:09] BACKUP src/utils.h -> .backups/utils.h.20240101_120002 (128 bytes)
+   [2026-04-07 01:45:09] SYNTAX_ERROR src/broken.c (c)
+   [2026-04-07 01:45:09] SYNTAX_OK src/utils.h (c)
+   ```
 
-── Activity ─────────────────────────
-  Total actions:  12
-  Backups made:   8
-  Syntax checks:  6
-  Syntax errors:  1
+   Running:
+   ```bash
+   echo '{"session_id":"test-session-1","stop_hook_active":false}' \
+       | bash .claude/hooks/post_session_summary.sh
+   ```
 
-── Most Edited Files ────────────────
-  1. src/main.c              (4 edits)
-  2. src/utils.h             (2 edits)
-  3. README.md               (1 edit)
+   Produces this stdout (JSON wrapping the report so Claude Code renders it):
+   ```json
+   {"systemMessage": "<report content — see below>"}
+   ```
 
-── File Types ───────────────────────
-  .c       files: 5
-  .h       files: 2
-  .sh      files: 1
-```
+   The inner report content, rendered from the log above:
+   ```
+   ╔══════════════════════════════════════╗
+   ║        SESSION SUMMARY REPORT        ║
+   ╚══════════════════════════════════════╝
+
+   Session: test-session-1
+   Period:  2026-04-07 01:45:09 -> 2026-04-07 01:45:09
+
+   ── Activity ─────────────────────────
+     Total actions: 6
+     Backups made: 3
+     Syntax checks: 3
+     Syntax errors: 1
+
+   ── Most Edited Files ────────────────
+     1. src/main.c (2 edits)
+     2. src/utils.h (1 edit)
+
+   ── File Types ───────────────────────
+     .c files: 4
+     .h files: 2
+   ```
+
+   Where each value comes from in the log:
+
+   | Report field | Value | Source in the log |
+   |---|---|---|
+   | Total actions | 6 | Every line is one action — the log has 6 lines |
+   | Backups made | 3 | 3 lines start with `BACKUP` (lines 1, 3, 4) |
+   | Syntax checks | 3 | 2 lines are `SYNTAX_OK` + 1 line is `SYNTAX_ERROR` |
+   | Syntax errors | 1 | 1 line is `SYNTAX_ERROR` (line 5) |
+   | `src/main.c` — 2 edits | most-edited | `src/main.c` is the backed-up file in lines 1 and 3 |
+   | `src/utils.h` — 1 edit | second | `src/utils.h` is the backed-up file in line 4 only |
+   | `.c` files: 4 | — | `main.c` is referenced in lines 1, 2, 3 and `broken.c` in line 5 |
+   | `.h` files: 2 | — | `utils.h` is referenced in lines 4 and 6 |
+
 6. Always exit `0`.
 
 **Exit codes:** Always `0`.
 
 **Test examples:**
 ```bash
-# Empty log — should print "No session activity":
+# Empty log — should print "No session activity recorded.":
 echo '{"session_id":"empty-session","stop_hook_active":false}' \
     | bash .claude/hooks/post_session_summary.sh
 
-# Loop guard — should exit 0 silently:
+# Loop guard — should exit 0 with no output at all:
 echo '{"session_id":"s1","stop_hook_active":true}' \
     | bash .claude/hooks/post_session_summary.sh
 
-# With the sample log:
-cp .claude/hooks/data/session_test-session-1.log .claude/hooks/data/session_demo.log
-echo '{"session_id":"demo","stop_hook_active":false}' \
+# With the provided sample log (session_test-session-1.log):
+echo '{"session_id":"test-session-1","stop_hook_active":false}' \
     | bash .claude/hooks/post_session_summary.sh
+# Expected stdout: {"systemMessage": "..."} containing the report above
 ```
 
 ---
